@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>GPX表示・描画地図</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    #map { height: 100vh; }
+    .menu {
+      position: absolute;
+      top: 10px;
+      left: 60px;
+      background: white;
+      padding: 10px;
+      z-index: 1000;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    }
+  </style>
+</head>
+<body>
+  <div class="menu">
+    <label>モード:
+      <select id="modeSelect">
+        <option value="view">GPX表示モード</option>
+        <option value="draw">ルート描画モード</option>
+      </select>
+    </label>
+    <div id="viewControls">
+      <label>地域:
+        <select id="areaSelect"></select>
+      </label>
+      <label>日付:
+        <select id="dateSelect" disabled></select>
+      </label>
+      <label>ルート名:
+        <select id="routeSelect" disabled></select>
+      </label>
+      <button id="loadBtn">ルート表示</button>
+      <button id="clearBtn">クリア</button>
+    </div>
+    <div id="drawControls" style="display:none;">
+      <button id="exportBtn">GPX出力</button>
+      <button id="drawClearBtn">描画クリア</button>
+    </div>
+  </div>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-gpx/1.5.0/gpx.min.js"></script>
+
+  <script>
+    const map = L.map('map').setView([36.5, 137.8], 10);
+    L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', {
+      attribution: "<a href='https://maps.gsi.go.jp/'>地理院地図</a>",
+      maxZoom: 18
+    }).addTo(map);
+
+    let mode = 'view';
+    let gpxLayers = [];
+    let drawnPoints = [];
+    let drawnLines = [];
+    let routeData = [];
+
+    document.getElementById('modeSelect').addEventListener('change', (e) => {
+      mode = e.target.value;
+      document.getElementById('viewControls').style.display = mode === 'view' ? 'block' : 'none';
+      document.getElementById('drawControls').style.display = mode === 'draw' ? 'block' : 'none';
+      if (mode === 'draw') {
+        switchToDrawMode();
+        disableGpxInteraction();
+      } else {
+        restoreGpxInteractions();
+      }
+    });
+
+    async function loadCSV() {
+      const response = await fetch('yamareco_yamakassou.csv');
+      const text = await response.text();
+      const rows = text.trim().split('\n').slice(1);
+      routeData = rows.map(row => {
+        const [area, route_name, date, gpx_file, url] = row.split(',');
+        return { date, area, route_name, gpx_file, url };
+      });
+
+      const areas = [...new Set(routeData.map(r => r.area))];
+      const areaSelect = document.getElementById('areaSelect');
+      areaSelect.innerHTML = '<option value="">--選択--</option>' + areas.map(a => `<option value="${a}">${a}</option>`).join('');
+    }
+
+    loadCSV();
+
+    document.getElementById('areaSelect').addEventListener('change', () => {
+      const selectedArea = document.getElementById('areaSelect').value;
+      const dateSelect = document.getElementById('dateSelect');
+      const routeSelect = document.getElementById('routeSelect');
+
+      if (!selectedArea) {
+        dateSelect.innerHTML = '';
+        routeSelect.innerHTML = '';
+        dateSelect.disabled = true;
+        routeSelect.disabled = true;
+        return;
+      }
+
+      const dates = routeData.filter(r => r.area === selectedArea)
+                             .map(r => r.date)
+                             .filter((v, i, a) => a.indexOf(v) === i)
+                             .sort();
+      dateSelect.innerHTML = '<option value="">--選択--</option>' + dates.map(d => `<option value="${d}">${d}</option>`).join('');
+      dateSelect.disabled = false;
+      routeSelect.innerHTML = '';
+      routeSelect.disabled = true;
+    });
+
+    document.getElementById('dateSelect').addEventListener('change', () => {
+      const selectedArea = document.getElementById('areaSelect').value;
+      const selectedDate = document.getElementById('dateSelect').value;
+      const routeSelect = document.getElementById('routeSelect');
+
+      if (!selectedArea || !selectedDate) {
+        routeSelect.innerHTML = '';
+        routeSelect.disabled = true;
+        return;
+      }
+
+      const routes = routeData.filter(r => r.area === selectedArea && r.date === selectedDate);
+      routeSelect.innerHTML = '<option value="">--選択--</option>' + routes.map(r => `<option value="${r.route_name}">${r.route_name}</option>`).join('');
+      routeSelect.disabled = false;
+    });
+
+    document.getElementById('loadBtn').addEventListener('click', () => {
+      const area = document.getElementById('areaSelect').value;
+      const date = document.getElementById('dateSelect').value;
+      const routeName = document.getElementById('routeSelect').value;
+      if (!area || !date || !routeName) return;
+
+      const target = routeData.find(r => r.area === area && r.date === date && r.route_name === routeName);
+      if (!target) return;
+
+      const gpx = new L.GPX(target.gpx_file, {
+        async: true,
+        polyline_options: {
+          color: 'red',
+          opacity: 0.6,
+          weight: 4
+        },
+        marker_options: { startIcon: null, endIcon: null,  startIconUrl: '',endIconUrl: '' }
+      }).on('loaded', (e) => {
+        map.fitBounds(e.target.getBounds());
+      }).on('addline', function(e) {
+        if (mode === 'view') {
+          addGpxInteraction(e.line, target);
+        }
+      });
+      gpx.addTo(map);
+      gpxLayers.push(gpx);
+    });
+
+    document.getElementById('clearBtn').addEventListener('click', () => {
+      gpxLayers.forEach(l => map.removeLayer(l));
+      gpxLayers = [];
+    });
+
+    function addGpxInteraction(line, target) {
+      const popupContent = `${target.date} - ${target.route_name}`;
+      line._onMouseOver = function () {
+        if (mode !== 'view') return;
+        this.setStyle({ color: 'blue' });
+        this.bindPopup(popupContent, { autoPan: false }).openPopup();
+      };
+      line._onMouseOut = function () {
+        if (mode !== 'view') return;
+        this.setStyle({ color: 'red' });
+        this.closePopup();
+      };
+      line._onClick = function () {
+        if (mode !== 'view') return;
+        if (target.url) {
+          window.open(target.url, '_blank');
+        }
+      };
+
+      line.on('mouseover', line._onMouseOver);
+      line.on('mouseout', line._onMouseOut);
+      line.on('click', line._onClick);
+    }
+
+    function disableGpxInteraction() {
+      interactionRefs.forEach((target, line) => {
+        if (line._onMouseOver) line.off('mouseover', line._onMouseOver);
+        if (line._onMouseOut) line.off('mouseout', line._onMouseOut);
+        if (line._onClick) line.off('click', line._onClick);
+      });
+    }
+    
+    function restoreGpxInteractions() {
+      gpxLayers.forEach(gpx => {
+        gpx.fire('addline');
+      });
+    }
+
+    function switchToDrawMode() {
+      // 描画イベントを設定
+      map.off('click');
+      drawnPoints = [];
+      drawnLines.forEach(line => map.removeLayer(line));
+      drawnLines = [];
+
+      map.on('click', function(e) {
+        const marker = L.marker(e.latlng).addTo(map);
+        drawnPoints.push(marker);
+
+        if (drawnPoints.length > 1) {
+          const lastTwo = drawnPoints.slice(-2).map(m => m.getLatLng());
+          const polyline = L.polyline(lastTwo, { color: 'blue' }).addTo(map);
+          drawnLines.push(polyline);
+        }
+
+        marker.on('click', function() {
+          if (drawnPoints.length >= 2) {
+            const removed = drawnPoints.pop();
+            map.removeLayer(removed);
+            const removedLine = drawnLines.pop();
+            map.removeLayer(removedLine);
+          }
+        });
+      });
+    }
+
+    document.getElementById('drawClearBtn').addEventListener('click', () => {
+      drawnPoints.forEach(m => map.removeLayer(m));
+      drawnLines.forEach(l => map.removeLayer(l));
+      drawnPoints = [];
+      drawnLines = [];
+    });
+  </script>
+</body>
+</html>
