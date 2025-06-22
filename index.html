@@ -247,6 +247,32 @@
       drawnPoints = [];
       drawnLines = [];
     });
+    document.getElementById('exportBtn').addEventListener('click', () => {
+      if (drawnPoints.length < 2) {
+        alert('2点以上のポイントを描画してください');
+        return;
+      }
+
+      const gpxHeader = `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Leaflet GPX Export" xmlns="http://www.topografix.com/GPX/1/1">\n  <trk>\n    <name>描画ルート</name>\n    <trkseg>`;
+      const gpxFooter = `\n    </trkseg>\n  </trk>\n</gpx>`;
+
+      const gpxPoints = drawnPoints.map((marker, index) => {
+        const { lat, lng } = marker.getLatLng();
+        return `\n      <trkpt lat="${lat.toFixed(6)}" lon="${lng.toFixed(6)}">\n      </trkpt>`;
+      }).join('');
+
+      const fullGpx = gpxHeader + gpxPoints + gpxFooter;
+      const blob = new Blob([fullGpx], { type: 'application/gpx+xml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'drawn_route.gpx';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+
   </script>
 </body>
 </html>
