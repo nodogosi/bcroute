@@ -17,6 +17,9 @@
       border-radius: 8px;
       box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
     }
+    .leaflet-popup-pane, .leaflet-tooltip-pane {
+      pointer-events: none; /* ポップアップによる画面移動を防ぐ */
+    }
   </style>
 </head>
 <body>
@@ -51,7 +54,11 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-gpx/1.5.0/gpx.min.js"></script>
 
   <script>
-    const map = L.map('map').setView([36.5, 137.8], 10);
+    const map = L.map('map', {
+      zoomControl: true,
+      scrollWheelZoom: true
+    }).setView([36.5, 137.8], 10);
+
     L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', {
       attribution: "<a href='https://maps.gsi.go.jp/'>地理院地図</a>",
       maxZoom: 18
@@ -62,6 +69,7 @@
     let drawnPoints = [];
     let drawnLines = [];
     let routeData = [];
+    const interactionRefs = new Map();
 
     document.getElementById('modeSelect').addEventListener('change', (e) => {
       mode = e.target.value;
@@ -146,12 +154,13 @@
           opacity: 0.6,
           weight: 4
         },
-        marker_options: { startIcon: null, endIcon: null,  startIconUrl: '',endIconUrl: '' }
+        marker_options: { startIcon: null, endIcon: null,  startIconUrl: '',endIconUrl: ''  }
       }).on('loaded', (e) => {
         map.fitBounds(e.target.getBounds());
       }).on('addline', function(e) {
         if (mode === 'view') {
           addGpxInteraction(e.line, target);
+          interactionRefs.set(e.line, target);
         }
       });
       gpx.addTo(map);
@@ -165,16 +174,20 @@
 
     function addGpxInteraction(line, target) {
       const popupContent = `${target.date} - ${target.route_name}`;
-      line._onMouseOver = function () {
+
+      line._onMouseOver = function (e) {
         if (mode !== 'view') return;
         this.setStyle({ color: 'blue' });
-        this.bindPopup(popupContent, { autoPan: false }).openPopup();
+        const latlng = e.latlng;
+        this.bindPopup(popupContent, { autoPan: false }).openPopup(latlng);
       };
+
       line._onMouseOut = function () {
         if (mode !== 'view') return;
         this.setStyle({ color: 'red' });
         this.closePopup();
       };
+
       line._onClick = function () {
         if (mode !== 'view') return;
         if (target.url) {
@@ -194,15 +207,14 @@
         if (line._onClick) line.off('click', line._onClick);
       });
     }
-    
+
     function restoreGpxInteractions() {
-      gpxLayers.forEach(gpx => {
-        gpx.fire('addline');
+      interactionRefs.forEach((target, line) => {
+        addGpxInteraction(line, target);
       });
     }
 
     function switchToDrawMode() {
-      // 描画イベントを設定
       map.off('click');
       drawnPoints = [];
       drawnLines.forEach(line => map.removeLayer(line));
